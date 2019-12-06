@@ -1,11 +1,13 @@
 package main
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/speps/go-hashids"
-	"time"
 	"github.com/astaxie/goredis"
+	"io"
+	"time"
 )
 
 const (
@@ -19,8 +21,59 @@ type RedisCli struct {
 	Cli *goredis.Client
 }
 
+func GetMD5(lurl string) string {
+	h := md5.New()
+	salt1 := "salt4shorturl"
+	io.WriteString(h, lurl+salt1)
+	urlmd5 := fmt.Sprintf("%x", h.Sum(nil))
+	return urlmd5
+}
+
+func getRange(start, end rune) (ran []rune) {
+	for i := start; i <= end; i++ {
+		ran = append(ran, i)
+	}
+	return ran
+}
+
+func merge(a, b []rune) []rune {
+	c := make([]rune, len(a)+len(b))
+	copy(c, a)
+	copy(c[len(a):], b)
+	return c
+}
+
+func Generate(num int64) (tiny string) {
+	fmt.Println(num)
+	num += 100000000
+	alpha := merge(getRange(48, 57), getRange(65, 90))
+	alpha = merge(alpha, getRange(97, 122))
+	if num < 62 {
+		tiny = string(alpha[num])
+		return tiny
+	} else {
+		var runes []rune
+		runes = append(runes, alpha[num%62])
+		num = num / 62
+		for num >= 1 {
+			if num < 62 {
+				runes = append(runes, alpha[num-1])
+			} else {
+				runes = append(runes, alpha[num%62])
+			}
+			num = num / 62
+
+		}
+		for i, j := 0, len(runes)-1; i < j; i, j = i+1, j-1 {
+			runes[i], runes[j] = runes[j], runes[i]
+		}
+		tiny = string(runes)
+		return tiny
+	}
+	return tiny
+}
 func (r *RedisCli) Shorten(url string, exp int64) (string, error) {
-	urlHash := toHash(url)
+	urlHash := GetMD5(url)
 	d, err := r.Cli.Get(fmt.Sprintf(UrlHashKey, urlHash))
 	//有可能不存在
 	if err != nil {
@@ -32,7 +85,7 @@ func (r *RedisCli) Shorten(url string, exp int64) (string, error) {
 			return string(d), nil
 		}
 	}
-	id,err := r.Cli.Incr(UrlIdKey)
+	id, err := r.Cli.Incr(UrlIdKey)
 	if err != nil {
 		return "", err
 	}
@@ -41,7 +94,7 @@ func (r *RedisCli) Shorten(url string, exp int64) (string, error) {
 	//	return "", err
 	//}
 	//shortLink := base62.EncodeInt64(id)
-	shortLink := toHash(fmt.Sprint(ShortLinkKey,id))
+	shortLink := Generate(id)
 	err = r.Cli.Setex(fmt.Sprintf(ShortLinkKey, shortLink), exp, []byte(url))
 	//err = r.Cli.Set(fmt.Sprintf(ShortLinkKey, shortLink), url,
 	//	time.Minute*time.Duration(exp)).Err()
@@ -49,7 +102,7 @@ func (r *RedisCli) Shorten(url string, exp int64) (string, error) {
 		return "", err
 	}
 
-	err = r.Cli.Setex(fmt.Sprintf(UrlHashKey, urlHash),exp, []byte(shortLink))
+	err = r.Cli.Setex(fmt.Sprintf(UrlHashKey, urlHash), exp, []byte(shortLink))
 	if err != nil {
 		return "", nil
 	}
@@ -61,20 +114,27 @@ func (r *RedisCli) Shorten(url string, exp int64) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	err = r.Cli.Setex(fmt.Sprintf(ShortLinkDetailKey, shortLink),exp, detail)
+	err = r.Cli.Setex(fmt.Sprintf(ShortLinkDetailKey, shortLink), exp, detail)
 	if err != nil {
 		return "", err
 	}
 	return shortLink, nil
 }
 
+//返回一个32位md5加密后的字符串
+func GetMD5Encode(data string) string {
+	h := md5.New()
+	h.Write([]byte(data))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+//返回一个16位md5加密后的字符串
+func Get16MD5Encode(data string) string {
+	return GetMD5Encode(data)[8:24]
+}
+
 func toHash(url string) string {
-	hd := hashids.NewData()
-	hd.Salt = url
-	hd.MinLength = 0
-	h, _ := hashids.NewWithData(hd)
-	r, _ := h.Encode([]int{45, 434, 1313, 99})
-	return r
+	return Get16MD5Encode(url)
 }
 
 func (r *RedisCli) ShortLinkInfo(shortLink string) (interface{}, error) {
@@ -83,11 +143,11 @@ func (r *RedisCli) ShortLinkInfo(shortLink string) (interface{}, error) {
 		return "", nil
 	} else {
 		var return_data = &UrlDetail{}
-		err := json.Unmarshal(detail,return_data)
-		if err != nil{
+		err := json.Unmarshal(detail, return_data)
+		if err != nil {
 			return "", err
 		}
-		if err != nil{
+		if err != nil {
 			return "", nil
 		}
 		return return_data, nil
