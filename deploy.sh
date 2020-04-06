@@ -1,3 +1,3 @@
 #!/bin/bash
-cd $PROJ_PATH/docker_short_link
+cd /usr/project/jenkins_test_docker
 sudo `which docker-compose` up -d

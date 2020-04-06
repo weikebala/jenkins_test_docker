@@ -1,8 +1,5 @@
 version: '2'
 
-networks:
-  weikebala:
-
 services:
   short_link:
     build: short_link
@@ -12,15 +9,10 @@ services:
       - redis
     expose:
       - "9001"
-
-  nginx:
-    build: nginx
-    networks:
-      - weikebala
-    depends_on:
-      - short_link
-    ports:
-      - "80:80"
+    labels:
+      - "traefik.backend=short_link"
+      - "traefik.frontend.rule=Host:apigw.fileserver.com"
+      - "traefik.docker.port=9001"
 
   redis:
     image: "redis"
@@ -28,6 +20,10 @@ services:
     - weikebala
     expose:
     - "6379"
+networks:
+  apinetwork:
+    external:
+      name: fileserver
 
 
 
